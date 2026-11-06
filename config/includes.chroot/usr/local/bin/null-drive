@@ -71,7 +71,7 @@ do_install() {
   echo "==> Installing"
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$tmp/nulldrive.deb" >/dev/null
   # The package starts it on :8080; make sure the firewall agrees
-  if [ -x /usr/local/bin/null-fw ] && nft list table inet null >/dev/null 2>&1; then
+  if [ -x /usr/local/bin/null-fw ] && systemctl is-active -q nftables 2>/dev/null; then
     /usr/local/bin/null-fw allow "$(port)" >/dev/null || true
   fi
   systemctl enable --now nulldrive >/dev/null 2>&1 || true

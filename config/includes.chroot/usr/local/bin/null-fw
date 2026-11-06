@@ -54,9 +54,15 @@ reload() {
   fi
 }
 
+fw_on() {
+  # nft needs root to read the ruleset; for everyone else, ask systemd
+  if [ "$(id -u)" -eq 0 ]; then nft list table inet null >/dev/null 2>&1
+  else systemctl is-active -q nftables 2>/dev/null; fi
+}
+
 status() {
   local on tcp udp
-  if nft list table inet null >/dev/null 2>&1; then on=on; else on=off; fi
+  if fw_on; then on=on; else on=off; fi
   tcp=$(elements tcp); udp=$(elements udp)
   if [ "${1:-}" = --short ]; then
     [ "$on" = on ] || { echo "firewall off"; return; }

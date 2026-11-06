@@ -222,7 +222,7 @@ def main():
                 break
             time.sleep(10)
         for c in ("fastfetch --pipe false", "null-info", "null-drive status", "null-fw status",
-                  "systemctl --failed --no-pager", "cat /etc/os-release", "echo $SHELL; zsh -ic 'print -P \"$PROMPT\"'"):
+                  "systemctl --failed --no-pager", "cat /etc/os-release", "echo $SHELL; zsh -ic '_null_vcs; _null_prompt; print -P \"$PROMPT\"'", "sudo -n true 2>&1; echo live | sudo -S null-fw status"):
             rc, txt = ssh(c)
             out.append(f"$ {c}\n{txt}\n")
         with open(os.path.join(OUT, "12-ssh.txt"), "w") as f:
