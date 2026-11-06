@@ -18,14 +18,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck nftables
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck nftables zsh
           shellcheck -S warning -x build.sh docker-build.sh auto/config tools/make-usb.sh \
             config/hooks/live/*.hook.chroot \
             config/includes.chroot/usr/local/bin/null-* config/includes.chroot/usr/local/sbin/null-* \
             config/includes.chroot/etc/update-motd.d/10-null
           zsh -n config/includes.chroot/etc/skel/.zshrc || true
           # the firewall file must parse (same check the build hook runs)
-          sudo nft -c -f <(sed 's#/etc/nftables.d/null-ports.nft#config/includes.chroot/etc/nftables.d/null-ports.nft#' config/includes.chroot/etc/nftables.conf)
+          sed "s#/etc/nftables.d/null-ports.nft#$PWD/config/includes.chroot/etc/nftables.d/null-ports.nft#" config/includes.chroot/etc/nftables.conf > /tmp/nftables.conf
+          sudo nft -c -f /tmp/nftables.conf
 
   build:
     needs: lint
