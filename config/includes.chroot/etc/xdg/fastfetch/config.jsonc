@@ -34,7 +34,7 @@
     {
       "type": "command",
       "key": "Services",
-      "text": "n=$(systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | wc -l); f=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | wc -l); if [ \"$f\" -gt 0 ]; then echo \"$n running, $f failed\"; else echo \"$n running\"; fi"
+      "text": "n=$(/usr/bin/systemctl list-units --type=service --state=running --no-legend 2>/dev/null | grep -c '\\.service'); f=$(/usr/bin/systemctl list-units --type=service --state=failed --no-legend 2>/dev/null | grep -c '\\.service'); if [ \"$f\" -gt 0 ]; then echo \"$n running, $f failed\"; else echo \"$n running\"; fi"
     },
     {
       "type": "command",
