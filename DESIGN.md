@@ -14,7 +14,7 @@ The decisions behind Null Server 1.0.0. Change this file first, then the build.
 
 ## What's deliberately not here
 
-No desktop, display manager, Plymouth, Calamares, Flatpak, PipeWire, icon theme or wallpaper. No NetworkManager (ifupdown with DHCP on every wired port; static addresses go in `/etc/network/interfaces.d/`). No Wi-Fi firmware by default (a server has a cable; `apt install firmware-iwlwifi` if not). No mail. No NULL // PLAY, no Tyler.
+No desktop, display manager, Plymouth, Calamares, Flatpak, PipeWire, icon theme or wallpaper. No NetworkManager (systemd-networkd with DHCP on every wired port; static addresses go in `/etc/systemd/network/`). No Wi-Fi firmware by default (a server has a cable; `apt install firmware-iwlwifi` if not). No mail. No NULL // PLAY, no Tyler.
 
 ## Terminal and shell
 
@@ -65,7 +65,7 @@ The one app the box is made for. Not pre-installed (it has its own release caden
 `null-install`, a bash + whiptail script in the live session (no Calamares, no d-i):
 
 - Whole disk, GPT: BIOS boot stub (amd64) + 512 MB EFI + root (ext4 default, xfs/btrfs optional). GRUB installed for UEFI (plus the removable-media fallback path) and BIOS, so the disk boots on either firmware
-- Copies the live squashfs with rsync, removes the live-only packages, makes the user (sudo, zsh), hostname, hosts, fstab by UUID, Debian mirrors back in apt, DHCP networking
+- Copies the live squashfs with rsync, removes the live-only packages, makes the user (sudo, zsh), hostname, hosts, fstab by UUID, Debian mirrors back in apt, systemd-networkd with DHCP on every wired port
 - Roles chosen at install time are written to `/var/lib/null-server/roles-pending` and installed by `null-roles-pending.service` on the first boot with internet
 - Unattended: `null.autoinstall=<url | /dev/disk/by-label/NULLCFG | path>` on the kernel line; the answers file uses `NULL_DISK=`, `NULL_HOSTNAME=`, `NULL_USER=`, `NULL_PASSWORD=`, `NULL_SSH_KEY=`, `NULL_ROLES=`, `NULL_FS=`, `NULL_TIMEZONE=`, `NULL_REBOOT=`
 - Log: `/var/log/null-install.log`

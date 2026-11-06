@@ -60,6 +60,9 @@ fi
 # ---- Services and defaults ----
 systemctl enable ssh chrony nftables lldpd null-firstboot null-roles-pending null-autoinstall 2>/dev/null || true
 systemctl disable systemd-timesyncd 2>/dev/null || true
+# The live session is networked by live-config (ifupdown + dhclient);
+# installed systems switch to systemd-networkd + resolved (null-install)
+systemctl disable systemd-networkd systemd-resolved 2>/dev/null || true
 echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | debconf-set-selections
 dpkg-reconfigure -f noninteractive unattended-upgrades || true
 # needrestart: restart services after upgrades without asking

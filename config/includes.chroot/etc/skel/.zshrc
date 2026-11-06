@@ -42,8 +42,8 @@ if (( NULL_GLYPH )); then NULL_SEP=$''; else NULL_SEP='@'; fi
 if [[ $COLORTERM == (truecolor|24bit) ]]; then
   _c_frame='#00e5ff' _c_user='#ff2e88' _c_path='#00e5ff' _c_err='#ff4d4d' _c_dim='#7f8fa6'
 elif [[ $TERM == linux ]]; then
-  # the text console knows 16 colours: bright cyan, bright magenta, bright red, white
-  _c_frame=14 _c_user=13 _c_path=14 _c_err=9 _c_dim=7
+  # the text console (terminfo: 8 colours): cyan, magenta, red, white; bold brightens
+  _c_frame=6 _c_user=5 _c_path=6 _c_err=1 _c_dim=7
 else
   _c_frame=51 _c_user=198 _c_path=51 _c_err=203 _c_dim=103
 fi

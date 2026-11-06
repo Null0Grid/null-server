@@ -22,6 +22,8 @@ live-config-systemd
 user-setup
 live-tools
 systemd-sysv
+systemd-resolved
+dbus
 sudo
 locales
 console-setup

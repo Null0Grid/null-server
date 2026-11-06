@@ -1,32 +1,48 @@
 # Networking on Null Server
 
-ifupdown, no NetworkManager. Every wired port (`en*`, `eth*`) gets DHCP for IPv4 and IPv6 out of the box (`/etc/network/interfaces.d/auto-dhcp`).
+Installed systems use **systemd-networkd** with **systemd-resolved** (no NetworkManager). Every wired port (`en*`, `eth*`) gets DHCP for IPv4 and IPv6 out of the box: `/etc/systemd/network/80-null-dhcp.network`. The live USB is networked by live-config (ifupdown + dhclient) instead.
+
+`networkctl status`, `resolvectl status`, `sudo networkctl reload` after a change.
 
 ## Static address
 
-Create `/etc/network/interfaces.d/eno1` (and delete the matching pattern line in `auto-dhcp` if you want to be tidy):
+Create `/etc/systemd/network/10-eno1.network` (lower number wins over the DHCP file for that port):
 
+```ini
+[Match]
+Name=eno1
+
+[Network]
+Address=10.0.0.20/24
+Gateway=10.0.0.1
+DNS=10.0.0.1
 ```
-auto eno1
-iface eno1 inet static
-    address 10.0.0.20/24
-    gateway 10.0.0.1
-    dns-nameservers 10.0.0.1
-```
-Then `sudo ifdown eno1; sudo ifup eno1`. (`dns-nameservers` needs the `resolvconf` package; without it, edit `/etc/resolv.conf`.)
+Then `sudo networkctl reload`.
 
 ## VLANs and bridges
 
-`vlan` and `bridge-utils` are installed:
+```ini
+# /etc/systemd/network/20-vlan30.netdev
+[NetDev]
+Name=vlan30
+Kind=vlan
+[VLAN]
+Id=30
 
-```
-auto eno1.30
-iface eno1.30 inet dhcp
+# /etc/systemd/network/10-eno1.network
+[Match]
+Name=eno1
+[Network]
+VLAN=vlan30
+DHCP=yes
 
-auto br0
-iface br0 inet dhcp
-    bridge_ports eno1
+# /etc/systemd/network/20-vlan30.network
+[Match]
+Name=vlan30
+[Network]
+DHCP=yes
 ```
+A bridge is the same shape with `Kind=bridge` and `Bridge=br0` on the member port (`man systemd.netdev`).
 
 ## Firewall
 

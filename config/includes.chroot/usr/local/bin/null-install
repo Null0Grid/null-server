@@ -161,21 +161,33 @@ HOSTS
 in_chroot apt-get purge -y -qq live-boot live-boot-initramfs-tools live-config live-config-systemd live-tools user-setup >/dev/null 2>&1 || true
 rm -f $T/etc/live/config.conf.d/* $T/etc/systemd/system/getty@tty1.service.d/null-live.conf 2>/dev/null || true
 in_chroot userdel -r user 2>/dev/null || true
-# Networking: DHCP on every wired port (ifupdown, no NetworkManager)
+# Networking: systemd-networkd, DHCP on every wired port (no NetworkManager,
+# no ifupdown stanzas; static addresses go in /etc/systemd/network/)
+mkdir -p $T/etc/systemd/network
+cat > $T/etc/systemd/network/80-null-dhcp.network <<'NET'
+# Null Server: DHCP (v4 and v6) on every ethernet port. For a static
+# address, add a file sorted before this one (see docs/networking.md).
+[Match]
+Name=en* eth*
+Type=ether
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseDomains=yes
+NET
 cat > $T/etc/network/interfaces <<'NET'
-# Null Server: DHCP on each ethernet port. Static addresses go in
-# /etc/network/interfaces.d/ (see docs/networking.md).
-source /etc/network/interfaces.d/*
+# Null Server uses systemd-networkd (/etc/systemd/network/); ifupdown only
+# keeps the loopback here.
 auto lo
 iface lo inet loopback
 NET
-mkdir -p $T/etc/network/interfaces.d
-cat > $T/etc/network/interfaces.d/auto-dhcp <<'NET'
-# every en*/eth* port, DHCP for IPv4 and IPv6
-allow-hotplug /en* /eth*
-iface /en* inet dhcp
-iface /eth* inet dhcp
-NET
+rm -rf $T/etc/network/interfaces.d
+rm -f $T/etc/resolv.conf
+ln -s /run/systemd/resolve/stub-resolv.conf $T/etc/resolv.conf
+in_chroot systemctl enable systemd-networkd systemd-resolved >/dev/null 2>&1 || true
 # live-build leaves apt pointed at the ISO; put Debian's mirrors back
 cat > $T/etc/apt/sources.list.d/debian.sources <<'APT'
 Types: deb
