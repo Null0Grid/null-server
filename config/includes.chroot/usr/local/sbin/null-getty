@@ -2,6 +2,6 @@
 # agetty wrapper for tty1: autologin as the live user on the live ISO only.
 tty=$1; term=${2:-linux}
 if grep -qw 'boot=live' /proc/cmdline && getent passwd user >/dev/null; then
-  exec /sbin/agetty -o '-p -f -- \\u' --autologin user --noclear "$tty" "$term"
+  exec /sbin/agetty -o '-p -f -- \u' --autologin user --noclear "$tty" "$term"
 fi
-exec /sbin/agetty -o '-p -- \\u' --noclear "$tty" "$term"
+exec /sbin/agetty -o '-p -- \u' --noclear "$tty" "$term"
