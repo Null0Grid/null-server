@@ -1,0 +1,40 @@
+#!/bin/sh
+# Runs once on the first boot of an installed (or cloned) Null Server:
+# fresh SSH host keys and machine-id, so two boxes made from the same
+# image never share an identity, and the root filesystem grows into the
+# disk when the image was written to a bigger one.
+set -e
+mkdir -p /var/lib/null-server
+
+# Host keys: only when none exist or they came from the image
+if [ ! -s /etc/ssh/ssh_host_ed25519_key ] || [ -e /var/lib/null-server/regen-host-keys ]; then
+  rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+  dpkg-reconfigure -f noninteractive openssh-server >/dev/null 2>&1 || ssh-keygen -A
+  rm -f /var/lib/null-server/regen-host-keys
+fi
+
+# machine-id: empty or the image's placeholder gets regenerated
+if [ ! -s /etc/machine-id ] || grep -qx 'uninitialized' /etc/machine-id 2>/dev/null; then
+  rm -f /etc/machine-id /var/lib/dbus/machine-id
+  systemd-machine-id-setup >/dev/null 2>&1 || true
+fi
+
+# Grow / into free space after it (SD cards, cloned VM disks)
+root_src=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+case "$root_src" in
+  /dev/*)
+    disk=$(lsblk -n -o PKNAME "$root_src" 2>/dev/null | head -1)
+    partnum=$(cat "/sys/class/block/$(basename "$root_src")/partition" 2>/dev/null || true)
+    if [ -n "$disk" ] && [ -n "$partnum" ] && command -v growpart >/dev/null; then
+      if growpart "/dev/$disk" "$partnum" >/dev/null 2>&1; then
+        fstype=$(findmnt -n -o FSTYPE /)
+        case "$fstype" in
+          ext4) resize2fs "$root_src" >/dev/null 2>&1 || true ;;
+          xfs)  xfs_growfs / >/dev/null 2>&1 || true ;;
+          btrfs) btrfs filesystem resize max / >/dev/null 2>&1 || true ;;
+        esac
+      fi
+    fi ;;
+esac
+
+touch /var/lib/null-server/firstboot-done

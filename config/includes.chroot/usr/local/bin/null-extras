@@ -1,0 +1,201 @@
+#!/bin/bash
+# null-extras: Null Server roles, one group at a time (the headless cousin
+# of the Null OS Extras app; same command, server groups).
+#
+#   null-extras list                     roles and whether they're installed
+#   null-extras install <role|all>...    add repos, install, finish setup
+#   null-extras installed-list           one line of installed roles (MOTD)
+#   null-extras info <role>              what a role installs
+#   (installer steps)  prep | repo <name> | post <name> | pending
+#
+# A role is a Debian package set plus the setup that makes it useful here:
+# the firewall port opens, the first user joins the right group, the
+# service is enabled. Everything downloads from Debian or the project's
+# own apt repo; nothing is pre-baked into the ISO.
+
+set -u
+export DEBIAN_FRONTEND=noninteractive
+CODENAME=$(. /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-trixie}")
+DARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)   # amd64 or arm64
+ORIG=("$@")
+
+# group | title | description | repo | packages | post
+GROUPS_DATA='nulldrive|Null Drive|The Null Drive server: file sync, web app, Null Notes backup and search (latest release, port 8080)||adduser|nulldrive
+containers|Containers|Docker Engine, Docker Compose and Podman||docker.io docker-compose podman|docker
+proxy|Reverse proxy|Caddy: HTTPS for anything on this box with one config line (ports 80 and 443)||caddy|proxy
+nas|File sharing|Samba (Windows/macOS shares) and NFS||samba nfs-kernel-server|nas
+vpn|VPN|WireGuard and Tailscale|tailscale|wireguard-tools tailscale|vpn
+monitoring|Monitoring|Prometheus node exporter (port 9100), sensors, SMART||prometheus-node-exporter lm-sensors smartmontools sysstat|monitoring
+homelab|Homelab tools|Ansible, kubectl and Terraform|kubernetes hashicorp|ansible sshpass kubectl terraform|
+network|Network toolkit|nmap, Wireshark CLI, arp-scan, ipcalc, snmp, whois, dnstools|wireshark|nmap tshark arp-scan ipcalc snmp whois dnsutils iputils-tracepath netdiscover|network
+virt|Virtual machines|QEMU/KVM with libvirt, headless (virsh; manage it from virt-manager elsewhere)||qemu-system qemu-utils libvirt-daemon-system libvirt-clients bridge-utils|libvirt
+backup|Backup|restic, borgbackup, rclone and rsnapshot||restic borgbackup rclone rsnapshot|
+dev|Programming tools|build tools, Python, Node.js, Go, Rust, GitHub CLI||build-essential cmake python3-venv python3-pip pipx nodejs npm golang-go rustc cargo gh shellcheck sqlite3|
+claude|Claude Code|Claude in the terminal (per-user install)||curl|claude'
+
+field() { # field <group> <n>
+  printf '%s\n' "$GROUPS_DATA" | awk -F'|' -v g="$1" -v n="$2" '$1==g {print $n}'
+}
+group_ids() { printf '%s\n' "$GROUPS_DATA" | cut -d'|' -f1; }
+
+need_root() { [ "$(id -u)" -eq 0 ] || exec sudo "$0" "${ORIG[@]}"; }
+
+first_user() {
+  # uid 1000: the account made by null-install, or the live user
+  local u; u=$(getent passwd 1000 | cut -d: -f1)
+  if [ -z "$u" ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then u=$SUDO_USER; fi
+  echo "$u"
+}
+
+fw_allow() { # fw_allow 80 443 51820/udp ...
+  [ -x /usr/local/bin/null-fw ] || return 0
+  nft list table inet null >/dev/null 2>&1 || return 0
+  local p; for p in "$@"; do /usr/local/bin/null-fw allow "$p" >/dev/null 2>&1 || true; done
+  return 0
+}
+
+prep() {
+  local stamp=/run/null-extras-updated
+  [ -e "$stamp" ] && [ -n "$(find "$stamp" -mmin -30 2>/dev/null)" ] && return 0
+  apt-get update -qq && touch "$stamp" 2>/dev/null
+  return 0
+}
+
+repo() {
+  local name=$1 key keyfile list line
+  case "$name" in
+    kubernetes)
+      local minor
+      minor=$(curl -fsSL --max-time 15 https://dl.k8s.io/release/stable.txt 2>/dev/null | cut -d. -f1,2)
+      case "$minor" in v1.*) ;; *) minor=v1.34 ;; esac
+      key="https://pkgs.k8s.io/core:/stable:/$minor/deb/Release.key"
+      keyfile=/usr/share/keyrings/kubernetes-apt-keyring.asc
+      list=/etc/apt/sources.list.d/kubernetes.list
+      line="deb [signed-by=$keyfile] https://pkgs.k8s.io/core:/stable:/$minor/deb/ /" ;;
+    hashicorp)
+      local cn=$CODENAME
+      curl -fsI --max-time 15 "https://apt.releases.hashicorp.com/dists/$cn/Release" >/dev/null 2>&1 || cn=bookworm
+      key=https://apt.releases.hashicorp.com/gpg
+      keyfile=/usr/share/keyrings/hashicorp-archive-keyring.asc
+      list=/etc/apt/sources.list.d/hashicorp.list
+      line="deb [arch=$DARCH signed-by=$keyfile] https://apt.releases.hashicorp.com $cn main" ;;
+    tailscale)
+      local cn=$CODENAME
+      curl -fsI --max-time 15 "https://pkgs.tailscale.com/stable/debian/$cn.noarmor.gpg" >/dev/null 2>&1 || cn=bookworm
+      key="https://pkgs.tailscale.com/stable/debian/$cn.noarmor.gpg"
+      keyfile=/usr/share/keyrings/tailscale-archive-keyring.gpg
+      list=/etc/apt/sources.list.d/tailscale.list
+      line="deb [signed-by=$keyfile] https://pkgs.tailscale.com/stable/debian $cn main" ;;
+    wireshark)
+      # Not a repo: let members of the wireshark group capture packets
+      echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections 2>/dev/null
+      prep; return 0 ;;
+    *) echo "null-extras: unknown repo $name" >&2; return 0 ;;
+  esac
+  if [ ! -s "$keyfile" ] || [ ! -s "$list" ]; then
+    if curl -fsSL --max-time 60 "$key" -o "$keyfile.tmp"; then
+      mv "$keyfile.tmp" "$keyfile"
+      echo "$line" > "$list"
+      rm -f /run/null-extras-updated
+    else
+      rm -f "$keyfile.tmp"
+      echo "null-extras: couldn't download the $name signing key; skipping" >&2
+    fi
+  fi
+  prep
+  return 0
+}
+
+post() {
+  local u; u=$(first_user)
+  case "$1" in
+    nulldrive)  /usr/local/bin/null-drive install ;;
+    docker)     [ -n "$u" ] && usermod -aG docker "$u"; systemctl enable --now docker 2>/dev/null ;;
+    proxy)      fw_allow 80 443; systemctl enable --now caddy 2>/dev/null ;;
+    nas)        fw_allow 445 139 137/udp 138/udp 2049 111 111/udp; systemctl enable --now smbd nfs-server 2>/dev/null ;;
+    vpn)        fw_allow 51820/udp 41641/udp; systemctl enable --now tailscaled 2>/dev/null
+                echo "    Tailscale: sudo tailscale up     WireGuard: /etc/wireguard/wg0.conf, then systemctl enable --now wg-quick@wg0" ;;
+    monitoring) fw_allow 9100; systemctl enable --now prometheus-node-exporter smartmontools 2>/dev/null; sensors-detect --auto >/dev/null 2>&1 || true ;;
+    network)    [ -n "$u" ] && usermod -aG wireshark "$u" ;;
+    libvirt)    [ -n "$u" ] && usermod -aG libvirt,kvm "$u"; systemctl enable --now libvirtd 2>/dev/null ;;
+    claude)
+      if [ -n "$u" ] && ! su - "$u" -c 'command -v claude' >/dev/null 2>&1; then
+        timeout 900 su - "$u" -c 'curl -fsSL https://claude.ai/install.sh | bash' \
+          || echo "null-extras: Claude Code didn't install; run: curl -fsSL https://claude.ai/install.sh | bash" >&2
+      fi ;;
+  esac
+  return 0
+}
+
+installed() { # installed <group>: all of its packages present?
+  local p provided
+  provided=$(dpkg-query -W -f='${Package} ${Provides}\n' 2>/dev/null | tr ',' ' ')
+  for p in $(field "$1" 5 | sed "s/\bqemu-system\b/qemu-system-$( [ "$DARCH" = arm64 ] && echo arm || echo x86 )/"); do
+    dpkg -s "$p" >/dev/null 2>&1 || grep -qw -- "$p" <<<"$provided" || return 1
+  done
+  case "$1" in
+    nulldrive) dpkg -s nulldrive >/dev/null 2>&1 || return 1 ;;
+    claude) local u; u=$(first_user); [ -n "$u" ] && [ -x "/home/$u/.local/bin/claude" ] || return 1 ;;
+  esac
+  return 0
+}
+
+install_groups() {
+  need_root
+  local list=() g r failed=()
+  for g in "$@"; do
+    if [ "$g" = all ]; then mapfile -t list < <(group_ids); break; fi
+    list+=("$g")
+  done
+  prep
+  for g in "${list[@]}"; do
+    if [ -z "$(field "$g" 1)" ]; then echo "Unknown role: $g (see: null-extras list)"; continue; fi
+    echo; echo "==> $(field "$g" 2)"
+    for r in $(field "$g" 4); do repo "$r"; done
+    # qemu-system: the metapackage pulls every architecture; take ours
+    local pkgs; pkgs=$(field "$g" 5 | sed "s/\bqemu-system\b/qemu-system-$( [ "$DARCH" = arm64 ] && echo arm || echo x86 )/")
+    # shellcheck disable=SC2086
+    if apt-get install -y -qq $pkgs; then
+      [ -n "$(field "$g" 6)" ] && post "$(field "$g" 6)"
+    else
+      failed+=("$(field "$g" 2)")
+    fi
+  done
+  echo
+  if [ ${#failed[@]} -eq 0 ]; then echo "Done. Log out and back in for new group memberships (docker, libvirt, wireshark)."
+  else echo "Done, but these didn't install: ${failed[*]}"; return 1; fi
+}
+
+list_groups() {
+  local g s
+  for g in $(group_ids); do
+    if installed "$g"; then s="installed"; else s="-"; fi
+    printf '%-12s %-18s %-10s %s\n' "$g" "$(field "$g" 2)" "$s" "$(field "$g" 3)"
+  done
+}
+
+installed_list() {
+  local g out=()
+  for g in $(group_ids); do installed "$g" && out+=("$g"); done
+  [ ${#out[@]} -gt 0 ] && echo "${out[*]}" || echo none
+}
+
+case "${1:-}" in
+  list) list_groups ;;
+  install) shift; [ $# -gt 0 ] || { echo "usage: null-extras install <role|all>..."; exit 2; }; install_groups "$@" ;;
+  installed-list) installed_list ;;
+  info-all) printf '%s\n' "$GROUPS_DATA" | cut -d'|' -f1-3 ;;
+  pending)
+    # first boot after null-install: roles picked in the installer
+    f=/var/lib/null-server/roles-pending
+    [ -s "$f" ] || exit 0
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do curl -fsI --max-time 10 https://deb.debian.org >/dev/null 2>&1 && break; sleep 10; done
+    # shellcheck disable=SC2046
+    install_groups $(cat "$f") && rm -f "$f" ;;
+  info) g=${2:-}; [ -n "$(field "$g" 1)" ] || { echo "unknown role"; exit 2; }
+        echo "$(field "$g" 2): $(field "$g" 3)"; echo "packages: $(field "$g" 5)" ;;
+  prep) prep ;;
+  repo) repo "${2:-}" ;;
+  post) post "${2:-}" ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

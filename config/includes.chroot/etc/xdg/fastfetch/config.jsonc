@@ -1,0 +1,52 @@
+// Null Server default fastfetch config: the Null OS one with the desktop
+// lines (DE, WM, theme, icons, font) swapped for server ones.
+// Copy to ~/.config/fastfetch/ to change it.
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "file",
+    "source": "/usr/share/null-server/fastfetch-logo.txt",
+    "color": { "1": "38;2;0;229;255" },
+    "padding": { "top": 1, "left": 1, "right": 4 }
+  },
+  "display": {
+    "separator": "  ",
+    "color": { "keys": "38;2;0;229;255", "title": "38;2;255;46;136" }
+  },
+  "modules": [
+    "title",
+    "separator",
+    { "type": "os", "key": "OS" },
+    {
+      "type": "command",
+      "key": "Base",
+      "text": ". /usr/lib/os-release.debian 2>/dev/null && echo \"$PRETTY_NAME\" || echo Debian"
+    },
+    "kernel",
+    "uptime",
+    "packages",
+    "shell",
+    "terminal",
+    "cpu",
+    "memory",
+    "disk",
+    "localip",
+    {
+      "type": "command",
+      "key": "Services",
+      "text": "n=$(systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | wc -l); f=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | wc -l); if [ \"$f\" -gt 0 ]; then echo \"$n running, $f failed\"; else echo \"$n running\"; fi"
+    },
+    {
+      "type": "command",
+      "key": "Roles",
+      "text": "/usr/local/bin/null-extras installed-list 2>/dev/null || echo none"
+    },
+    {
+      "type": "command",
+      "key": "Null Drive",
+      "text": "/usr/local/bin/null-drive status --short 2>/dev/null || echo 'not installed (null-drive install)'"
+    },
+    "break",
+    "colors"
+  ]
+}

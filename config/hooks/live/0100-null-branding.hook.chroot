@@ -1,0 +1,86 @@
+#!/bin/sh
+# Runs inside the image during build. Null Server identity, the Null OS
+# terminal (Null Mono, zsh), services and defaults. Values come from
+# /etc/null-server-release, which build.sh generates from null-server.conf.
+set -ex
+. /etc/null-server-release
+
+# ---- os-release (diverted so base-files upgrades don't overwrite it) ----
+if ! dpkg-divert --list /usr/lib/os-release | grep -q null-server; then
+  dpkg-divert --package null-server-branding --add --rename \
+    --divert /usr/lib/os-release.debian /usr/lib/os-release
+fi
+. /usr/lib/os-release.debian
+cat > /usr/lib/os-release <<OS
+PRETTY_NAME="$NULL_NAME $NULL_VERSION (Debian $VERSION_ID based)"
+NAME="$NULL_NAME"
+VERSION_ID="$NULL_VERSION"
+VERSION="$NULL_VERSION ($VERSION_CODENAME)"
+VERSION_CODENAME=$VERSION_CODENAME
+ID=$NULL_ID
+ID_LIKE=debian
+HOME_URL="https://github.com/Null0Grid/null-server"
+SUPPORT_URL="https://github.com/Null0Grid/null-server/issues"
+BUG_REPORT_URL="https://github.com/Null0Grid/null-server/issues"
+OS
+printf '%s %s \\n \\l\n\n' "$NULL_NAME" "$NULL_VERSION" > /etc/issue
+printf '%s %s\n' "$NULL_NAME" "$NULL_VERSION" > /etc/issue.net
+
+# ---- Null Mono font (JetBrains Mono + the Null mark at U+E900) ----
+# Same font as Null OS. A server has no GUI, but the TTF ships so you can
+# copy it to the machine you SSH from (null-font).
+mkdir -p /usr/share/fonts/truetype/null-mono
+found=0
+find /usr/share/fonts -iname 'JetBrainsMono*.ttf' ! -path '*null-mono*' > /tmp/jbm.list
+while IFS= read -r f; do
+  out="/usr/share/fonts/truetype/null-mono/$(basename "$f" | sed 's/JetBrainsMono/NullMono/')"
+  python3 /usr/share/null-server/patch-font.py "$f" "$out"
+  found=1
+done < /tmp/jbm.list
+rm -f /tmp/jbm.list
+[ "$found" = 1 ] || { echo "ERROR: JetBrains Mono not found, cannot build Null Mono" >&2; exit 1; }
+fc-cache -f >/dev/null
+
+# ---- zsh as the default shell for everyone ----
+sed -i 's|^#\?DSHELL=.*|DSHELL=/bin/zsh|' /etc/adduser.conf
+sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || echo 'SHELL=/bin/zsh' >> /etc/default/useradd
+chsh -s /bin/zsh root
+cp /etc/skel/.zshrc /root/.zshrc
+
+# ---- Groups null-install and live-config put users in ----
+for g in netdev plugdev dialout cdrom wireshark; do groupadd -r -f "$g"; done
+
+# ---- Serial console in GRUB (installed systems) ----
+case "$NULL_ARCH" in arm64) ser=ttyAMA0 ;; *) ser=ttyS0 ;; esac
+sed -i "s/@SERIAL@/$ser/" /etc/default/grub.d/null-server.cfg
+if [ ! -f /etc/default/grub ] && [ -f /usr/share/grub/default/grub ]; then
+  cp /usr/share/grub/default/grub /etc/default/grub
+fi
+
+# ---- Services and defaults ----
+systemctl enable ssh chrony nftables lldpd null-firstboot null-roles-pending null-autoinstall 2>/dev/null || true
+systemctl disable systemd-timesyncd 2>/dev/null || true
+echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | debconf-set-selections
+dpkg-reconfigure -f noninteractive unattended-upgrades || true
+# needrestart: restart services after upgrades without asking
+mkdir -p /etc/needrestart/conf.d
+echo '$nrconf{restart} = "a";' > /etc/needrestart/conf.d/null-server.conf
+# Static MOTD is the one-liner in /etc/motd; the rest comes from update-motd.d
+# (Debian's pam_motd already runs /etc/update-motd.d). Drop Debian's legal notice.
+: > /etc/motd.tail 2>/dev/null || true
+chmod +x /etc/update-motd.d/* /usr/local/bin/null-* /usr/local/sbin/null-*
+
+# ---- Keep UID/GID 1000 free for the first real user ----
+g=$(getent group 1000 | cut -d: -f1 || true)
+if [ -n "$g" ]; then
+  newgid=$(awk -F: 'BEGIN{for(i=999;i>100;i--)u[i]=1} {delete u[$3]} END{for(i=999;i>100;i--) if(i in u){print i; exit}}' /etc/group)
+  groupmod -g "$newgid" "$g"
+fi
+u=$(getent passwd 1000 | cut -d: -f1 || true)
+if [ -n "$u" ]; then
+  newuid=$(awk -F: 'BEGIN{for(i=999;i>100;i--)u[i]=1} {delete u[$3]} END{for(i=999;i>100;i--) if(i in u){print i; exit}}' /etc/passwd)
+  usermod -u "$newuid" "$u"
+fi
+
+# ---- Sanity: the firewall file parses ----
+nft -c -f /etc/nftables.conf

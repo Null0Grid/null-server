@@ -1,0 +1,82 @@
+# Core system (same base as Null OS, minus everything graphical)
+#if ARCHITECTURES amd64
+linux-image-amd64
+amd64-microcode
+intel-microcode
+# GRUB tools for null-install (the metapackages would ask questions at build)
+grub2-common
+grub-pc-bin
+grub-efi-amd64-bin
+#endif
+#if ARCHITECTURES arm64
+linux-image-arm64
+grub2-common
+grub-efi-arm64-bin
+#endif
+efibootmgr
+live-boot
+live-config
+live-config-systemd
+# live-config only *recommends* these, and recommends are off: without
+# user-setup the live user is never created and every login fails
+user-setup
+live-tools
+systemd-sysv
+sudo
+locales
+console-setup
+keyboard-configuration
+bash-completion
+man-db
+less
+nano
+vim-tiny
+ca-certificates
+curl
+wget
+git
+rsync
+unzip
+zstd
+htop
+btop
+tmux
+jq
+lsof
+pciutils
+usbutils
+lshw
+smartmontools
+nvme-cli
+parted
+gdisk
+dosfstools
+e2fsprogs
+xfsprogs
+btrfs-progs
+cryptsetup
+lvm2
+mdadm
+squashfs-tools
+whiptail
+openssh-server
+openssh-client
+chrony
+unattended-upgrades
+apt-listchanges
+needrestart
+firmware-linux-free
+firmware-misc-nonfree
+firmware-realtek
+firmware-bnx2
+firmware-bnx2x
+firmware-qlogic
+# Shell and fonts (the Null OS terminal)
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
+fastfetch
+fontconfig
+fonts-jetbrains-mono
+python3
+python3-fonttools

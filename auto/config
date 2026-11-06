@@ -1,0 +1,32 @@
+#!/bin/sh
+# Called by `lb config`. Generates the live-build configuration.
+set -e
+. ./null-server.conf
+
+# Serial console: last console= wins as the primary, so the screen stays
+# primary and the serial port gets a copy (and a login, via systemd's
+# getty generator). arm64 boards and VMs use ttyAMA0 instead of ttyS0.
+case "$ARCH" in
+  arm64) ARCH_OPTS="--bootloaders grub-efi --linux-flavours arm64"
+         SERIAL="console=ttyAMA0,115200 console=tty0" ;;
+  *)     ARCH_OPTS=""
+         SERIAL="console=ttyS0,115200 console=tty0" ;;
+esac
+
+# shellcheck disable=SC2086
+lb config noauto \
+  --distribution "$DEBIAN_SUITE" \
+  --architectures "$ARCH" \
+  $ARCH_OPTS \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --binary-images iso-hybrid \
+  --debian-installer none \
+  --security true \
+  --updates true \
+  --apt-recommends false \
+  --firmware-chroot true \
+  --iso-application "$DISTRO_NAME" \
+  --iso-volume "$(echo "$DISTRO_ID" | tr a-z A-Z)_$DISTRO_VERSION" \
+  --iso-publisher "$DISTRO_NAME" \
+  --bootappend-live "boot=live components hostname=$DISTRO_HOSTNAME username=user live-config.user-default-groups=sudo,netdev,dialout,plugdev,cdrom persistence quiet $SERIAL" \
+  "$@"

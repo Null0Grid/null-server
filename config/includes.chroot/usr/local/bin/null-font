@@ -1,0 +1,16 @@
+#!/bin/sh
+# null-font: where Null Mono lives and how to get it onto the machine you
+# SSH from, so the prompt shows the Null mark instead of @.
+d=/usr/share/fonts/truetype/null-mono
+echo "Null Mono (JetBrains Mono + the Null mark at U+E900): $d"
+ls "$d" 2>/dev/null | sed 's/^/  /'
+cat <<TXT
+
+On the machine you SSH from:
+  scp '$(whoami)@$(hostname):$d/*.ttf' ~/.local/share/fonts/ && fc-cache -f
+  (Windows: copy them to C:\\Windows\\Fonts; macOS: ~/Library/Fonts)
+Set your terminal's font to "Null Mono", then connect with
+  ssh -o SendEnv=NULL_GLYPH -o SendEnv=COLORTERM $(hostname)
+with NULL_GLYPH=1 exported locally (or put "SendEnv NULL_GLYPH COLORTERM"
+in ~/.ssh/config). Null OS already has the font; it only needs the SendEnv.
+TXT

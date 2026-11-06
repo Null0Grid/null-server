@@ -1,0 +1,15 @@
+# Open ports. Managed by `null-fw`; hand edits are fine too, then
+# `sudo nft -f /etc/nftables.conf`.
+#   22    SSH
+#   8080  Null Drive (web app and sync; null-drive install uses this)
+#   5353  mDNS (Null Drive announces itself on the LAN; drop it if unwanted)
+set tcp_open {
+  type inet_service
+  flags interval
+  elements = { 22, 8080 }
+}
+set udp_open {
+  type inet_service
+  flags interval
+  elements = { 5353 }
+}

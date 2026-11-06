@@ -1,0 +1,14 @@
+[Unit]
+Description=Null Server: install the roles picked in the installer
+ConditionPathExists=/var/lib/null-server/roles-pending
+After=network-online.target null-firstboot.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/null-extras pending
+TimeoutStartSec=2h
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Null Server unattended install (null.autoinstall= on the kernel line)
+ConditionKernelCommandLine=null.autoinstall
+ConditionKernelCommandLine=boot=live
+After=network-online.target getty@tty1.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/null-autoinstall
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

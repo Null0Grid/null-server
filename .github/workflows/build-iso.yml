@@ -1,0 +1,176 @@
+name: Build Null Server
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Also put the ISOs on this existing release (e.g. 1.0.0)"
+        required: false
+        default: ""
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck nftables
+          shellcheck -S warning -x build.sh docker-build.sh auto/config tools/make-usb.sh \
+            config/hooks/live/*.hook.chroot \
+            config/includes.chroot/usr/local/bin/null-* config/includes.chroot/usr/local/sbin/null-* \
+            config/includes.chroot/etc/update-motd.d/10-null
+          zsh -n config/includes.chroot/etc/skel/.zshrc || true
+          # the firewall file must parse (same check the build hook runs)
+          sudo nft -c -f <(sed 's#/etc/nftables.d/null-ports.nft#config/includes.chroot/etc/nftables.d/null-ports.nft#' config/includes.chroot/etc/nftables.conf)
+
+  build:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    container:
+      image: debian:trixie
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ISO
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -o pipefail
+          ./build.sh 2>&1 | tee build-full.log
+          ls -la *.iso
+      - name: Upload ISO
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: null-server-iso-${{ matrix.arch }}
+          path: |
+            *.iso
+            *.sha256
+          retention-days: 3
+          compression-level: 0
+      - name: Put the ISO on the release
+        if: inputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          apt-get install -y -qq gh >/dev/null
+          git config --global --add safe.directory "$PWD"
+          R="${{ github.repository }}"
+          ISO=$(ls *.iso | head -1)
+          [ -f "$ISO.sha256" ] || sha256sum "$ISO" > "$ISO.sha256"
+          for a in $(gh release view "$TAG" -R "$R" --json assets --jq '.assets[].name'); do
+            case "$a" in nullserver-*-"$ARCH".iso|nullserver-*-"$ARCH".iso.sha256)
+              gh release delete-asset "$TAG" "$a" -R "$R" -y ;; esac
+          done
+          gh release upload "$TAG" "$ISO" "$ISO.sha256" -R "$R" --clobber
+          NOTES="docs/release-notes-$TAG.md"
+          if [ -f "$NOTES" ]; then gh release edit "$TAG" -R "$R" --title "Null Server $TAG" --notes-file "$NOTES"
+          else gh release edit "$TAG" -R "$R" --title "Null Server $TAG"; fi
+      - name: Build log on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          [ -f build.log ] || cp build-full.log build.log
+          grep -nE '^(E:|P: Begin|ERROR)|Unable to locate|no installation candidate|Traceback|[Ee]rror' build.log | tail -40 \
+            | while IFS= read -r line; do echo "::error title=build-error::${line:0:900}"; done
+          tail -8 build-full.log | while IFS= read -r line; do echo "::error title=build-output::${line:0:900}"; done
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.arch }}
+          path: build*.log
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu: qemu-system-x86
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: qemu-system-arm qemu-efi-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: null-server-iso-${{ matrix.arch }}
+      - name: Enable KVM
+        continue-on-error: true
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install QEMU
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ${{ matrix.qemu }} qemu-utils python3-pil sshpass
+      - name: Boot, install, reboot, SSH in
+        timeout-minutes: 50
+        continue-on-error: true
+        env:
+          NULL_VM_ARCH: ${{ matrix.arch }}
+        run: python3 tools/vm-test.py *.iso shots
+      - name: Show the SSH checks
+        if: always()
+        run: cat shots/12-ssh.txt 2>/dev/null || echo "no SSH output"
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.arch }}
+          path: shots/*
+      - name: Publish screenshots to the screenshots branch
+        if: always()
+        run: |
+          cd shots
+          git init -q -b screenshots-${{ matrix.arch }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          printf '# Null Server screenshots (%s)\n\nFrom build %s (%s)\n\n' "${{ matrix.arch }}" "${GITHUB_SHA::7}" "$(date -u +%F)" > README.md
+          for f in *.png; do printf '### %s\n![%s](%s)\n\n' "${f%.png}" "$f" "$f" >> README.md; done
+          git add -A
+          git commit -q -m "Screenshots from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" screenshots-${{ matrix.arch }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: null-server-iso-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.iso
+            *.sha256

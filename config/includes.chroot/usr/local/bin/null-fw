@@ -1,0 +1,92 @@
+#!/bin/bash
+# null-fw: the Null Server firewall (nftables), one command.
+#
+#   null-fw status             open ports and whether the firewall is on
+#   null-fw allow 443          open a TCP port (or 51820/udp, or 8000-8010)
+#   null-fw deny 443           close it again
+#   null-fw off | on           disable / enable the whole firewall
+#   null-fw reload             apply /etc/nftables.conf after a hand edit
+#
+# Ports live in /etc/nftables.d/null-ports.nft; this edits that file and
+# reloads the ruleset, so a change survives reboots.
+set -euo pipefail
+PORTS=/etc/nftables.d/null-ports.nft
+
+need_root() { [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"; }
+
+elements() { # elements tcp|udp -> "22, 8080"
+  awk -v s="${1}_open" '$0 ~ "set " s " " {f=1} f && /elements/ {sub(/.*= *\{ */,""); sub(/ *\}.*/,""); print; exit} f && /^}/ {exit}' "$PORTS"
+}
+
+set_elements() { # set_elements tcp|udp "22, 8080"
+  local proto=$1 list=$2
+  python3 - "$PORTS" "$proto" "$list" <<'PY'
+import re, sys
+path, proto, lst = sys.argv[1:]
+text = open(path).read()
+block = re.compile(r'(set %s_open \{.*?)(elements = \{[^}]*\}\n)?(\})' % proto, re.S)
+def repl(m):
+    body = m.group(1).rstrip(" \t")
+    if not body.endswith("\n"):
+        body += "\n"
+    el = f"  elements = {{ {lst} }}\n" if lst.strip() else ""
+    return body + el + m.group(3)
+text, n = block.subn(repl, text, count=1)
+if n != 1:
+    sys.exit(f"null-fw: no 'set {proto}_open' block in {path}")
+open(path, "w").write(text)
+PY
+}
+
+parse() { # parse 443 | 443/tcp | 51820/udp | 8000-8010 -> PORT PROTO
+  local spec=$1 port proto=tcp
+  case "$spec" in */udp) proto=udp; spec=${spec%/udp} ;; */tcp) spec=${spec%/tcp} ;; esac
+  port=$spec
+  [[ $port =~ ^[0-9]{1,5}(-[0-9]{1,5})?$ ]] || { echo "null-fw: bad port '$1' (use 443, 443/tcp, 51820/udp or 8000-8010)" >&2; exit 2; }
+  echo "$port $proto"
+}
+
+reload() {
+  if nft -c -f /etc/nftables.conf; then
+    nft -f /etc/nftables.conf
+  else
+    echo "null-fw: /etc/nftables.conf has an error; nothing changed" >&2; exit 1
+  fi
+}
+
+status() {
+  local on tcp udp
+  if nft list table inet null >/dev/null 2>&1; then on=on; else on=off; fi
+  tcp=$(elements tcp); udp=$(elements udp)
+  if [ "${1:-}" = --short ]; then
+    [ "$on" = on ] || { echo "firewall off"; return; }
+    printf 'tcp %s' "${tcp:-none}"; [ -n "$udp" ] && printf '  udp %s' "$udp"; echo
+    return
+  fi
+  echo "Firewall: $on$( [ "$on" = on ] || echo " (null-fw on)")"
+  echo "TCP open: ${tcp:-none}"
+  echo "UDP open: ${udp:-none}"
+  echo "Rules:    /etc/nftables.conf, ports in $PORTS"
+}
+
+case "${1:-}" in
+  status) status "${2:-}" ;;
+  allow|deny)
+    need_root "$@"
+    read -r port proto <<<"$(parse "${2:?usage: null-fw $1 <port>[/udp]}")"
+    cur=$(elements "$proto")
+    IFS=', ' read -r -a arr <<<"$cur"
+    new=()
+    for p in "${arr[@]}"; do [ -n "$p" ] && [ "$p" != "$port" ] && new+=("$p"); done
+    [ "$1" = allow ] && new+=("$port")
+    # keep the list sorted by first number
+    mapfile -t new < <(printf '%s\n' "${new[@]}" | sed '/^$/d' | sort -t- -k1,1n -u)
+    list=$(printf '%s, ' "${new[@]}"); list=${list%, }
+    set_elements "$proto" "$list"
+    reload
+    status --short ;;
+  on)  need_root "$@"; systemctl enable --now nftables >/dev/null; reload; status --short ;;
+  off) need_root "$@"; systemctl disable --now nftables >/dev/null; nft flush ruleset; echo "firewall off (null-fw on to enable)" ;;
+  reload) need_root "$@"; reload; status --short ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

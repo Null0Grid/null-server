@@ -1,0 +1,243 @@
+#!/bin/bash
+# null-install: put Null Server on a disk, from the live session.
+#
+#   sudo null-install                       asks (whiptail): disk, hostname,
+#                                           user, password, SSH key, roles
+#   sudo null-install --disk /dev/sda --hostname grid --user luc \
+#        --password '...' [--ssh-key 'ssh-ed25519 AAAA...' | --ssh-key-file F]
+#        [--roles nulldrive,containers] [--fs ext4|xfs|btrfs] [--yes]
+#   sudo null-install --answers FILE        the same keys as NULL_DISK=,
+#                                           NULL_HOSTNAME=, ... (see docs/
+#                                           unattended.md); implies --yes
+#
+# What it does: GPT, an EFI partition (and a BIOS boot stub on amd64) and
+# one root partition on the whole disk; copies the live system; makes the
+# user (sudo, zsh); hostname; SSH key (password login then turns off);
+# GRUB for UEFI and BIOS; roles install on the first boot with internet.
+# ERASES THE DISK.
+set -euo pipefail
+
+LOG=/var/log/null-install.log
+DISK=''; HOST=''; USER_=''; PASS=''; KEY=''; ROLES=''; FS=ext4; YES=0; ANSWERS=''; TZ_=''; p2=''
+NULL_ARCH=$(dpkg --print-architecture)
+
+die() { echo "null-install: $*" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+grep -qw 'boot=live' /proc/cmdline || die "run this from the Null Server live USB"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --disk) DISK=$2; shift 2 ;;
+    --hostname) HOST=$2; shift 2 ;;
+    --user) USER_=$2; shift 2 ;;
+    --password) PASS=$2; shift 2 ;;
+    --ssh-key) KEY=$2; shift 2 ;;
+    --ssh-key-file) KEY=$(cat "$2"); shift 2 ;;
+    --roles) ROLES=$2; shift 2 ;;
+    --fs) FS=$2; shift 2 ;;
+    --timezone) TZ_=$2; shift 2 ;;
+    --answers) ANSWERS=$2; YES=1; shift 2 ;;
+    --yes|-y) YES=1; shift ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option $1" ;;
+  esac
+done
+
+if [ -n "$ANSWERS" ]; then
+  # shellcheck disable=SC1090
+  . "$ANSWERS"
+  DISK=${NULL_DISK:-$DISK} HOST=${NULL_HOSTNAME:-$HOST} USER_=${NULL_USER:-$USER_}
+  PASS=${NULL_PASSWORD:-$PASS} KEY=${NULL_SSH_KEY:-$KEY} ROLES=${NULL_ROLES:-$ROLES}
+  FS=${NULL_FS:-$FS} TZ_=${NULL_TIMEZONE:-$TZ_}
+fi
+
+# ---- Questions (only for what wasn't given) ----
+live_disk() { lsblk -no PKNAME "$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null)" 2>/dev/null | head -1; }
+disks() { lsblk -dpno NAME,SIZE,MODEL,TYPE | awk -v skip="/dev/$(live_disk)" '$NF=="disk" && $1 !~ /loop|sr[0-9]|zram/ && $1 != skip {print}'; }
+ask() { # ask <var> <title> <prompt> [default] [password]
+  local var=$1 title=$2 prompt=$3 def=${4:-} pw=${5:-} v
+  if [ "$pw" = pw ]; then v=$(whiptail --title "$title" --passwordbox "$prompt" 10 60 3>&1 1>&2 2>&3) || exit 1
+  else v=$(whiptail --title "$title" --inputbox "$prompt" 10 60 "$def" 3>&1 1>&2 2>&3) || exit 1; fi
+  printf -v "$var" '%s' "$v"
+}
+if [ -z "$DISK" ]; then
+  mapfile -t items < <(disks | awk '{printf "%s\n%s %s %s\n", $1, $2, $3, $4}')
+  [ ${#items[@]} -gt 0 ] || die "no disks found"
+  DISK=$(whiptail --title "Null Server install" --menu "Install to which disk? It will be ERASED." 18 70 8 "${items[@]}" 3>&1 1>&2 2>&3) || exit 1
+fi
+[ -b "$DISK" ] || die "$DISK is not a block device"
+[ -z "$HOST" ] && ask HOST "Hostname" "Name of this server (the prompt shows user<mark>host):" null
+[ -z "$USER_" ] && ask USER_ "Your account" "Username (gets sudo):" admin
+if [ -z "$PASS" ]; then
+  while :; do
+    ask PASS "Password" "Password for $USER_:" "" pw
+    ask p2 "Password" "Again:" "" pw
+    [ "$PASS" = "$p2" ] && [ -n "$PASS" ] && break
+    whiptail --msgbox "Passwords didn't match or were empty. Try again." 8 50
+  done
+fi
+if [ -z "$KEY" ] && [ "$YES" = 0 ]; then
+  ask KEY "SSH key (optional)" "Paste a public key (ssh-ed25519 AAAA...). With a key, password login over SSH is turned off. Leave empty to skip:" ""
+fi
+if [ -z "$ROLES" ] && [ "$YES" = 0 ]; then
+  args=()
+  while IFS='|' read -r id title desc _; do args+=("$id" "$title: $desc" off); done < <(/usr/local/bin/null-extras info-all 2>/dev/null || true)
+  if [ ${#args[@]} -gt 0 ]; then
+    sel=$(whiptail --title "Roles (optional)" --checklist "Installed on the first boot, from the internet. Null Drive is the one you came for." 20 78 10 "${args[@]}" 3>&1 1>&2 2>&3) || sel=""
+    ROLES=$(echo "$sel" | tr -d '"' | tr ' ' ',')
+  fi
+fi
+[[ $HOST =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || die "bad hostname '$HOST'"
+[[ $USER_ =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "bad username '$USER_'"
+case "$FS" in ext4|xfs|btrfs) ;; *) die "--fs must be ext4, xfs or btrfs" ;; esac
+
+if [ "$YES" = 0 ]; then
+  whiptail --title "Last chance" --yesno "ERASE $DISK ($(lsblk -dno SIZE,MODEL "$DISK" | xargs)) and install Null Server?\n\nhost: $HOST   user: $USER_   fs: $FS\nssh key: $( [ -n "$KEY" ] && echo yes || echo no)   roles: ${ROLES:-none}" 14 70 || exit 1
+fi
+
+exec > >(tee -a "$LOG") 2>&1
+echo "==> Null Server install to $DISK ($(date))"
+set -x
+
+# ---- Partition ----
+swapoff -a 2>/dev/null || true
+umount -R /mnt/null 2>/dev/null || true
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount "$p" 2>/dev/null || true; done
+wipefs -af "$DISK"
+sgdisk --zap-all "$DISK" >/dev/null
+if [ "$NULL_ARCH" = amd64 ]; then
+  sgdisk -n1:0:+1M   -t1:EF02 -c1:bios   "$DISK" >/dev/null
+  sgdisk -n2:0:+512M -t2:EF00 -c2:efi    "$DISK" >/dev/null
+  sgdisk -n3:0:0     -t3:8300 -c3:root   "$DISK" >/dev/null
+  EFI_N=2 ROOT_N=3
+else
+  sgdisk -n1:0:+512M -t1:EF00 -c1:efi    "$DISK" >/dev/null
+  sgdisk -n2:0:0     -t2:8300 -c2:root   "$DISK" >/dev/null
+  EFI_N=1 ROOT_N=2
+fi
+partprobe "$DISK"; udevadm settle; sleep 1
+part() { lsblk -lnpo NAME "$DISK" | grep -E "[^0-9]$1\$|p$1\$" | head -1; }
+EFI=$(part $EFI_N); ROOT=$(part $ROOT_N)
+{ [ -b "$EFI" ] && [ -b "$ROOT" ]; } || die "partitions not found on $DISK"
+mkfs.vfat -F32 -n EFI "$EFI" >/dev/null
+case "$FS" in
+  ext4)  mkfs.ext4 -qF -L nullroot "$ROOT" ;;
+  xfs)   mkfs.xfs -qf -L nullroot "$ROOT" ;;
+  btrfs) mkfs.btrfs -qf -L nullroot "$ROOT" ;;
+esac
+
+# ---- Copy the live system ----
+T=/mnt/null
+mkdir -p $T; mount "$ROOT" $T
+mkdir -p $T/boot/efi; mount "$EFI" $T/boot/efi
+SRC=/run/live/rootfs/filesystem.squashfs
+[ -d "$SRC" ] || SRC=$(findmnt -n -o TARGET -t squashfs | head -1)
+[ -d "$SRC" ] || die "live filesystem not found"
+set +x; echo "==> Copying the system (a few minutes)"; set -x
+rsync -aAXH --info=progress2 --exclude={/proc/*,/sys/*,/dev/*,/run/*,/tmp/*,/mnt/*,/media/*,/lost+found} "$SRC/" $T/
+# The live session's own changes to /etc that matter (keyboard, locale)
+for f in /etc/default/keyboard /etc/default/locale /etc/locale.gen; do [ -f "$f" ] && cp "$f" "$T$f"; done
+
+# ---- Make it a real system ----
+for d in dev dev/pts proc sys run; do mount --bind "/$d" "$T/$d"; done
+mount -t efivarfs efivarfs $T/sys/firmware/efi/efivars 2>/dev/null || true
+in_chroot() { chroot $T /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive "$@"; }
+
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT"); EFI_UUID=$(blkid -s UUID -o value "$EFI")
+cat > $T/etc/fstab <<FSTAB
+# Null Server
+UUID=$ROOT_UUID  /         $FS   defaults,noatime  0 1
+UUID=$EFI_UUID   /boot/efi vfat  umask=0077        0 1
+FSTAB
+echo "$HOST" > $T/etc/hostname
+cat > $T/etc/hosts <<HOSTS
+127.0.0.1   localhost
+127.0.1.1   $HOST
+::1         localhost ip6-localhost ip6-loopback
+HOSTS
+[ -n "$TZ_" ] && [ -f "$T/usr/share/zoneinfo/$TZ_" ] && { echo "$TZ_" > $T/etc/timezone; ln -sf "/usr/share/zoneinfo/$TZ_" $T/etc/localtime; }
+
+# Drop the live-only pieces
+in_chroot apt-get purge -y -qq live-boot live-boot-initramfs-tools live-config live-config-systemd live-tools user-setup >/dev/null 2>&1 || true
+rm -f $T/etc/live/config.conf.d/* $T/etc/systemd/system/getty@tty1.service.d/null-live.conf 2>/dev/null || true
+in_chroot userdel -r user 2>/dev/null || true
+# Networking: DHCP on every wired port (ifupdown, no NetworkManager)
+cat > $T/etc/network/interfaces <<'NET'
+# Null Server: DHCP on each ethernet port. Static addresses go in
+# /etc/network/interfaces.d/ (see docs/networking.md).
+source /etc/network/interfaces.d/*
+auto lo
+iface lo inet loopback
+NET
+mkdir -p $T/etc/network/interfaces.d
+cat > $T/etc/network/interfaces.d/auto-dhcp <<'NET'
+# every en*/eth* port, DHCP for IPv4 and IPv6
+allow-hotplug /en* /eth*
+iface /en* inet dhcp
+iface /eth* inet dhcp
+NET
+# live-build leaves apt pointed at the ISO; put Debian's mirrors back
+cat > $T/etc/apt/sources.list.d/debian.sources <<'APT'
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: trixie-security
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+APT
+rm -f $T/etc/apt/sources.list
+rm -rf $T/var/lib/apt/lists/* $T/var/cache/apt/*.bin
+
+# The user
+in_chroot useradd -m -s /bin/zsh -G sudo,netdev,dialout,plugdev,cdrom "$USER_"
+echo "$USER_:$PASS" | in_chroot chpasswd
+in_chroot passwd -l root >/dev/null
+if [ -n "$KEY" ]; then
+  install -d -m 700 -o "$(stat -c %u "$T/home/$USER_")" -g "$(stat -c %g "$T/home/$USER_")" "$T/home/$USER_/.ssh"
+  echo "$KEY" > "$T/home/$USER_/.ssh/authorized_keys"
+  chmod 600 "$T/home/$USER_/.ssh/authorized_keys"
+  chown -R "$(stat -c %u "$T/home/$USER_"):$(stat -c %g "$T/home/$USER_")" "$T/home/$USER_/.ssh"
+  sed -i 's/^PasswordAuthentication .*/PasswordAuthentication no/' $T/etc/ssh/sshd_config.d/10-null-server.conf
+fi
+# Fresh identity on first boot (host keys, machine-id)
+rm -f $T/etc/ssh/ssh_host_*; : > $T/etc/machine-id
+mkdir -p $T/var/lib/null-server; touch $T/var/lib/null-server/regen-host-keys
+rm -f $T/var/lib/null-server/firstboot-done
+in_chroot systemctl enable null-firstboot ssh nftables chrony >/dev/null 2>&1 || true
+# Roles: install on first boot with internet, via a one-shot unit
+if [ -n "$ROLES" ]; then
+  echo "${ROLES//,/ }" > $T/var/lib/null-server/roles-pending
+  in_chroot systemctl enable null-roles-pending >/dev/null 2>&1 || true
+fi
+
+# Bootloader: UEFI (also as the removable-media fallback, for picky
+# firmware) and BIOS on amd64, so the disk boots either way
+sed -i "s/@SERIAL@/$( [ "$NULL_ARCH" = arm64 ] && echo ttyAMA0 || echo ttyS0 )/" $T/etc/default/grub.d/null-server.cfg
+[ -f $T/etc/default/grub ] || cp $T/usr/share/grub/default/grub $T/etc/default/grub
+if [ "$NULL_ARCH" = amd64 ]; then
+  in_chroot grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=nullserver --no-nvram --removable || true
+  if [ -d /sys/firmware/efi ]; then in_chroot grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=nullserver || true; fi
+  in_chroot grub-install --target=i386-pc "$DISK"
+else
+  in_chroot grub-install --target=arm64-efi --efi-directory=/boot/efi --bootloader-id=nullserver --no-nvram --removable || true
+  if [ -d /sys/firmware/efi ]; then in_chroot grub-install --target=arm64-efi --efi-directory=/boot/efi --bootloader-id=nullserver || true; fi
+fi
+in_chroot update-initramfs -u -k all >/dev/null
+in_chroot update-grub
+
+set +x
+sync
+for d in run sys/firmware/efi/efivars sys proc dev/pts dev; do umount -l "$T/$d" 2>/dev/null || true; done
+umount -R $T
+cp "$LOG" /tmp/null-install.log 2>/dev/null || true
+echo
+echo "==> Done. Null Server is on $DISK."
+echo "    Remove the USB stick and reboot:  sudo reboot"
+echo "    Then: ssh $USER_@$HOST  (or the IP the MOTD shows on the console)"
+[ -n "$ROLES" ] && echo "    Roles ($ROLES) install on the first boot; watch with: journalctl -u null-roles-pending -f"
+exit 0

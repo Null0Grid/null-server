@@ -1,0 +1,14 @@
+#!/bin/sh
+# Null Server system summary
+. /etc/os-release
+echo "$PRETTY_NAME"
+echo "Host:    $(hostname)   Kernel: $(uname -r)   Arch: $(uname -m)"
+echo "Uptime:  $(uptime -p)   Load: $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "CPU:     $(nproc) cores - $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')"
+echo "Memory:  $(free -h | awk '/Mem:/ {print $3 " used / " $2}')"
+echo "Disk /:  $(df -h / | awk 'NR==2 {print $3 " used / " $2 " (" $5 ")"}')"
+echo "Addrs:"
+ip -br -4 addr show | grep -v '^lo' | sed 's/^/         /'
+echo "Open:    $(/usr/local/bin/null-fw status --short 2>/dev/null || echo 'firewall off')"
+echo "Roles:   $(/usr/local/bin/null-extras installed-list 2>/dev/null || echo none)"
+echo "Drive:   $(/usr/local/bin/null-drive status --short 2>/dev/null || echo 'not installed')"

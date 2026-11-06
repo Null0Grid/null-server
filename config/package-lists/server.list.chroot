@@ -1,0 +1,31 @@
+# Server basics that every Null Server has, before any role is added.
+# Networking
+iproute2
+iputils-ping
+ifupdown
+isc-dhcp-client
+nftables
+dnsutils
+mtr-tiny
+traceroute
+tcpdump
+ethtool
+net-tools
+netcat-openbsd
+socat
+iperf3
+wireguard-tools
+bridge-utils
+vlan
+lldpd
+# Runs as a guest
+qemu-guest-agent
+cloud-guest-utils
+# Null Drive's .deb needs these (and nothing else)
+adduser
+# Mail-less cron and logs
+cron
+logrotate
+# Serial / out-of-band
+minicom
+picocom

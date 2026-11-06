@@ -1,0 +1,27 @@
+#!/bin/sh
+# Unattended install. Boot the ISO with
+#   null.autoinstall=http://host/answers.conf     (fetched)
+#   null.autoinstall=/dev/disk/by-label/NULLCFG   (a USB stick labelled NULLCFG
+#                                                  with answers.conf on it)
+# answers.conf: NULL_DISK=, NULL_HOSTNAME=, NULL_USER=, NULL_PASSWORD=,
+# NULL_SSH_KEY=, NULL_ROLES=, NULL_FS=, NULL_TIMEZONE=, NULL_REBOOT=1
+set -e
+src=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^null\.autoinstall=//p' | head -1)
+[ -n "$src" ] || exit 0
+tmp=/run/null-answers.conf
+case "$src" in
+  http://*|https://*)
+    for _ in $(seq 1 30); do curl -fsSL --max-time 20 "$src" -o "$tmp" && break; sleep 5; done ;;
+  /dev/*)
+    m=/run/null-cfg; mkdir -p "$m"
+    for _ in $(seq 1 20); do [ -b "$src" ] && break; sleep 2; done
+    mount -o ro "$src" "$m"; cp "$m/answers.conf" "$tmp"; umount "$m" ;;
+  *) cp "$src" "$tmp" ;;
+esac
+[ -s "$tmp" ] || { echo "null-autoinstall: no answers at $src"; exit 1; }
+chmod 600 "$tmp"
+echo "null-autoinstall: installing from $src"
+/usr/local/bin/null-install --answers "$tmp"
+# shellcheck disable=SC1090
+. "$tmp"
+if [ "${NULL_REBOOT:-1}" = 1 ]; then sync; systemctl reboot; fi

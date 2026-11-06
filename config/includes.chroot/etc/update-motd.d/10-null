@@ -1,0 +1,39 @@
+#!/bin/sh
+# Dynamic MOTD for SSH and console logins (pam_motd runs this).
+# Neon Lab colours, quiet by default: cyan for keys, pink for the name,
+# red only when something is wrong.
+C='\033[38;2;0;229;255m' P='\033[38;2;255;46;136m' D='\033[38;2;127;143;166m' R='\033[38;2;255;77;77m' N='\033[0m'
+[ -t 1 ] || { C=''; P=''; D=''; R=''; N=''; }
+. /etc/os-release
+ip4=$(ip -br -4 addr show scope global 2>/dev/null | awk '{print $3}' | cut -d/ -f1 | paste -sd' ' -)
+load=$(cut -d' ' -f1-3 /proc/loadavg)
+disk=$(df -h / | awk 'NR==2 {print $5 " of " $2}')
+mem=$(free -h | awk '/Mem:/ {print $3 " / " $2}')
+failed=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | wc -l)
+# Pending updates, counted at most every 6 h (apt's dry run takes a second)
+cache=/var/cache/null-server/updates
+if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +360 2>/dev/null)" ]; then
+  mkdir -p /var/cache/null-server
+  apt-get -s upgrade 2>/dev/null | grep -c '^Inst' > "$cache" 2>/dev/null || echo 0 > "$cache"
+fi
+upd=$(cat "$cache" 2>/dev/null || echo 0)
+printf '\n  %b%s%b  %b%s%b\n' "$P" "$PRETTY_NAME" "$N" "$D" "$(uname -r)" "$N"
+printf '  %bhost%b %s   %bip%b %s\n' "$C" "$N" "$(hostname)" "$C" "$N" "${ip4:-none}"
+printf '  %bup%b %s   %bload%b %s   %bmem%b %s   %bdisk%b %s\n' \
+  "$C" "$N" "$(uptime -p | sed 's/^up //')" "$C" "$N" "$load" "$C" "$N" "$mem" "$C" "$N" "$disk"
+if [ "$failed" -gt 0 ]; then
+  printf '  %b%s failed service(s)%b: systemctl --failed\n' "$R" "$failed" "$N"
+fi
+if [ "$upd" -gt 0 ]; then
+  printf '  %b%s package update(s)%b available\n' "$D" "$upd" "$N"
+fi
+if [ -x /usr/local/bin/null-drive ]; then
+  s=$(/usr/local/bin/null-drive status --short 2>/dev/null)
+  case "$s" in
+    running*) printf '  %bnull drive%b %s\n' "$C" "$N" "$s" ;;
+    "")       ;;
+    *)        printf '  %bnull drive%b %s\n' "$D" "$N" "$s" ;;
+  esac
+fi
+[ -f /var/run/reboot-required ] && printf '  %breboot required%b\n' "$R" "$N"
+echo

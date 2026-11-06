@@ -1,0 +1,127 @@
+#!/bin/bash
+# null-drive: Null Drive on Null Server, one command.
+#
+#   null-drive install [version]   latest (or a given) release .deb from
+#                                  Null0Grid/null-drive, started on :8080
+#   null-drive update              newest release, keeps your data
+#   null-drive status [--short]    running? version? the URL to open
+#   null-drive url                 just the URL
+#   null-drive logs                follow the service log
+#   null-drive port <n>            move it to another port (firewall follows)
+#   null-drive remove              uninstall; files stay in /var/lib/nulldrive
+#
+# The server is one static binary (SQLite inside), runs as the nulldrive
+# system user, data in /var/lib/nulldrive, settings in /etc/default/nulldrive.
+set -euo pipefail
+REPO=Null0Grid/null-drive
+DARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+
+ORIG=("$@")
+need_root() { [ "$(id -u)" -eq 0 ] || exec sudo "$0" "${ORIG[@]}"; }
+
+port() { # configured port
+  local p
+  p=$(sed -n 's/^NULLDRIVE_PORT=//p' /etc/default/nulldrive 2>/dev/null | tail -1)
+  echo "${p:-8080}"
+}
+
+url() {
+  local ip
+  ip=$(ip -br -4 addr show scope global 2>/dev/null | awk '{print $3}' | cut -d/ -f1 | head -1)
+  echo "http://${ip:-$(hostname)}:$(port)"
+}
+
+installed_version() { dpkg-query -W -f='${Version}' nulldrive 2>/dev/null || true; }
+
+release_json() { # release_json [tag]
+  local tag=${1:-}
+  if [ -n "$tag" ]; then tag="tags/v${tag#v}"; else tag=latest; fi
+  curl -fsSL --max-time 30 "https://api.github.com/repos/$REPO/releases/$tag"
+}
+
+deb_url() { # deb_url <release json>
+  jq -r --arg a "$DARCH" '.assets[] | select(.name | test("^nulldrive_.*_" + $a + "\\.deb$")) | .browser_download_url' | head -1
+}
+
+do_install() {
+  need_root
+  local want=${1:-} json url tmp ver
+  echo "==> Null Drive: looking up ${want:-the latest} release"
+  json=$(release_json "$want") || { echo "null-drive: GitHub release lookup failed (no internet?)" >&2; exit 1; }
+  url=$(deb_url <<<"$json")
+  ver=$(jq -r .tag_name <<<"$json"); ver=${ver#v}
+  [ -n "$url" ] || { echo "null-drive: release $ver has no $DARCH .deb" >&2; exit 1; }
+  if [ "$(installed_version)" = "$ver" ]; then echo "Null Drive $ver is already installed."; status; return 0; fi
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  echo "==> Downloading nulldrive $ver ($DARCH)"
+  curl -fL --progress-bar --max-time 600 "$url" -o "$tmp/nulldrive.deb"
+  if command -v sha256sum >/dev/null; then
+    local sums
+    sums=$(jq -r '.assets[] | select(.name == "SHA256SUMS.txt") | .browser_download_url' <<<"$json")
+    if [ -n "$sums" ] && curl -fsSL --max-time 60 "$sums" -o "$tmp/SHA256SUMS.txt"; then
+      local want_sum have_sum
+      want_sum=$(grep " $(basename "$url")\$" "$tmp/SHA256SUMS.txt" | awk '{print $1}' | head -1)
+      have_sum=$(sha256sum "$tmp/nulldrive.deb" | awk '{print $1}')
+      if [ -n "$want_sum" ] && [ "$want_sum" != "$have_sum" ]; then
+        echo "null-drive: checksum mismatch, not installing" >&2; exit 1
+      fi
+      [ -n "$want_sum" ] && echo "    checksum ok"
+    fi
+  fi
+  echo "==> Installing"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$tmp/nulldrive.deb" >/dev/null
+  # The package starts it on :8080; make sure the firewall agrees
+  if [ -x /usr/local/bin/null-fw ] && nft list table inet null >/dev/null 2>&1; then
+    /usr/local/bin/null-fw allow "$(port)" >/dev/null || true
+  fi
+  systemctl enable --now nulldrive >/dev/null 2>&1 || true
+  sleep 1
+  echo
+  status
+  echo
+  echo "Open $(url) to create the admin account."
+  echo "Then in the Null Grid browser: Settings > Drive > address $(url)"
+}
+
+status() {
+  local ver state
+  ver=$(installed_version)
+  if [ -z "$ver" ]; then
+    [ "${1:-}" = --short ] && { echo "not installed (null-drive install)"; return 0; }
+    echo "Null Drive: not installed. Run: null-drive install"; return 0
+  fi
+  if systemctl is-active -q nulldrive 2>/dev/null; then state=running; else state="stopped ($(systemctl is-active nulldrive 2>/dev/null || true))"; fi
+  if [ "${1:-}" = --short ]; then echo "$state  v$ver  $(url)"; return 0; fi
+  echo "Null Drive $ver: $state"
+  echo "URL:      $(url)"
+  echo "Data:     /var/lib/nulldrive ($(du -sh /var/lib/nulldrive 2>/dev/null | cut -f1 || echo '?'))"
+  echo "Settings: /etc/default/nulldrive   (systemctl restart nulldrive after a change)"
+  echo "Logs:     null-drive logs"
+}
+
+do_port() {
+  need_root
+  local new=${1:?usage: null-drive port <n>} old
+  [[ $new =~ ^[0-9]{2,5}$ ]] || { echo "bad port" >&2; exit 2; }
+  old=$(port)
+  [ -f /etc/default/nulldrive ] || { echo "Null Drive isn't installed" >&2; exit 1; }
+  sed -i "s/^NULLDRIVE_PORT=.*/NULLDRIVE_PORT=$new/" /etc/default/nulldrive
+  grep -q '^NULLDRIVE_PORT=' /etc/default/nulldrive || echo "NULLDRIVE_PORT=$new" >> /etc/default/nulldrive
+  if [ -x /usr/local/bin/null-fw ]; then
+    /usr/local/bin/null-fw allow "$new" >/dev/null || true
+    if [ "$old" != 22 ] && [ "$old" != "$new" ]; then /usr/local/bin/null-fw deny "$old" >/dev/null || true; fi
+  fi
+  systemctl restart nulldrive
+  status
+}
+
+case "${1:-}" in
+  install) shift; do_install "$@" ;;
+  update)  shift; do_install ;;
+  status)  status "${2:-}" ;;
+  url)     url ;;
+  logs)    exec journalctl -u nulldrive -f ;;
+  port)    shift; do_port "$@" ;;
+  remove)  need_root; apt-get remove -y nulldrive; echo "Removed. Your files are still in /var/lib/nulldrive." ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
