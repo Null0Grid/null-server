@@ -1,0 +1,84 @@
+$ fastfetch --pipe false
+[1m
+[38;2;0;229;255m [38;2;0;229;255m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣄⡀
+ [38;2;0;229;255m⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣤⣤⣠⣿⡟⠁⢀⣄⡀
+ [38;2;0;229;255m⠀⠀⠀⠀⠀⣠⣴⣿⠿⠛⠛⣻⣿⠿⣿⣦⣾⡿⠁
+ [38;2;0;229;255m⠀⠀⠀⠀⣴⣿⠏⠁⠀⠀⣼⣿⠋⠀⣨⣿⣿⣧
+ [38;2;0;229;255m⠀⠀⠀⢸⣿⠃⠀⠀⢀⣾⡿⠁⠀⣰⣿⠏⠘⣿⡇
+ [38;2;0;229;255m⠀⠀⠀⣿⣿⠀⠀⢠⣿⡟⠁⢀⣼⣿⠃⠀⠀⣿⣿
+ [38;2;0;229;255m⠀⠀⠀⢸⣿⡄⣰⣿⠏⠀⢀⣾⡿⠁⠀⠀⢠⣿⡇
+ [38;2;0;229;255m⠀⠀⠀⠀⢻⣿⣿⡋⠀⣠⣿⡟⠀⠀⢀⣰⣿⠟
+ [38;2;0;229;255m⠀⠀⠀⢀⣾⡿⠻⣿⣶⣿⣯⣤⣤⣶⣿⠟⠋
+ [38;2;0;229;255m⠀⠀⠀⠈⠙⠁⢀⣼⣿⠋⠛⠛⠉⠉
+ [38;2;0;229;255m⠀⠀⠀⠀⠀⠀⠈⠙⠁
+ [m[1G[12A[m[24C[m[1m[38;2;255;46;136mluc[m@[1m[38;2;255;46;136mgrid[m
+[24C--------
+[24C[m[1m[38;2;0;229;255mOS[m[m  [mNull Server 1.1.0 (Debian 13 based) x86_64
+[24C[m[1m[38;2;0;229;255mBase[m[m  [mDebian GNU/Linux 13 (trixie)
+[24C[m[1m[38;2;0;229;255mKernel[m  [mLinux 6.12.115+deb13.1-amd64
+[24C[m[1m[38;2;0;229;255mUptime[m  [m48 seconds
+[24C[m[1m[38;2;0;229;255mPackages[m  [m443 (dpkg)
+[24C[m[1m[38;2;0;229;255mShell[m  [msshd-session: luc@notty
+[24C[m[1m[38;2;0;229;255mTerminal[m  [m
+[24C[m[1m[38;2;0;229;255mCPU[m  [mAMD EPYC 7763 64-Core (2) @ 2.44 GHz
+[24C[m[1m[38;2;0;229;255mMemory[m  [m266.38 MiB / 1.93 GiB ([32m13%[m)
+[24C[m[1m[38;2;0;229;255mDisk (]8;;file:///\/]8;;\)[m  [m1.92 GiB / 7.28 GiB ([32m26%[m) - ext4
+[24C[m[1m[38;2;0;229;255mLocal IP (ens3)[m  [m10.0.2.15/24
+[24C[m[1m[38;2;0;229;255mServices[m[m  [m13 running
+[24C[m[1m[38;2;0;229;255mRoles[m[m  [mnone
+[24C[m[1m[38;2;0;229;255mNull Drive[m[m  [mnot installed (null-drive install)
+[24C
+[24C[m[40m   [41m   [42m   [43m   [44m   [45m   [46m   [47m   [m
+[24C[100m   [101m   [102m   [103m   [104m   [105m   [106m   [107m   [m
+
+$ null-info
+Null Server 1.1.0 (Debian 13 based)
+Host:    grid   Kernel: 6.12.115+deb13.1-amd64   Arch: x86_64
+Uptime:  up 0 minutes   Load: 0.20 0.07 0.02
+CPU:     2 cores - AMD EPYC 7763 64-Core Processor
+Memory:  278Mi used / 1.9Gi
+Disk /:  2.0G used / 7.3G (28%)
+Addrs:
+         ens3             UP             10.0.2.15/24 metric 1024 
+Open:    tcp 22, 8080  udp 5353
+Roles:   none
+Drive:   not installed (null-drive install)
+
+$ null-drive status
+Null Drive: not installed. Run: null-drive install
+
+$ null-fw status
+Firewall: on
+TCP open: 22, 8080
+UDP open: 5353
+Rules:    /etc/nftables.conf, ports in /etc/nftables.d/null-ports.nft
+
+$ systemctl --failed --no-pager
+  UNIT LOAD ACTIVE SUB DESCRIPTION
+
+0 loaded units listed.
+
+$ cat /etc/os-release
+PRETTY_NAME="Null Server 1.1.0 (Debian 13 based)"
+NAME="Null Server"
+VERSION_ID="1.1.0"
+VERSION="1.1.0 (trixie)"
+VERSION_CODENAME=trixie
+ID=nullserver
+ID_LIKE=debian
+HOME_URL="https://github.com/Null0Grid/null-server"
+SUPPORT_URL="https://github.com/Null0Grid/null-server/issues"
+BUG_REPORT_URL="https://github.com/Null0Grid/null-server/issues"
+
+$ echo $SHELL; zsh -ic '_null_vcs; _null_prompt; print -P "$PROMPT"'
+/bin/zsh
+[351m┌──([3198mluc@grid[351m)-[[351m~[351m]
+[351m└─[351m$[39m 
+
+$ sudo -n true 2>&1; echo live | sudo -S null-fw status
+sudo: a password is required
+Firewall: on
+TCP open: 22, 8080
+UDP open: 5353
+Rules:    /etc/nftables.conf, ports in /etc/nftables.d/null-ports.nft
+[sudo] password for luc: 
