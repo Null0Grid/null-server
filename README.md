@@ -29,12 +29,12 @@ Every push to `main` builds both architectures on GitHub Actions:
 1. Open **Actions → Build Null Server → latest run**.
 2. Download **null-server-iso-amd64** or **null-server-iso-arm64**.
 
-Tagging a release (`git tag v1.0.0 && git push --tags`) attaches both ISOs to a GitHub Release.
+Tagging a release (`v1.1.0` or `1.1.0`) attaches both ISOs to the GitHub Release; for a release made by hand, Actions → Build Null Server → Run workflow → type the tag.
 
 ## Put it on a USB stick
 
 ```
-sudo tools/make-usb.sh nullserver-1.0.0-trixie-amd64.iso /dev/sdX
+sudo tools/make-usb.sh nullserver-1.1.0-trixie-amd64.iso /dev/sdX
 ```
 That also adds a `persistence` partition, so you can use the stick itself as a tiny server that keeps its changes. A plain `dd` or balenaEtcher works too.
 

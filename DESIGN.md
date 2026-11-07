@@ -1,6 +1,6 @@
 # Null Server — Design
 
-The decisions behind Null Server 1.0.0. Change this file first, then the build.
+The decisions behind Null Server 1.1.0. Change this file first, then the build.
 
 ## Identity
 
@@ -78,7 +78,7 @@ Same command and data format as the Null OS Extras (`group|title|description|rep
 
 - live-build, `--debian-installer none`, recommends off, firmware in; `build.sh` + `auto/config`, same as Null OS
 - amd64 (BIOS + UEFI hybrid ISO) and arm64 (UEFI), built natively on GitHub's runners
-- Versioning starts at 1.0.0, independent of Null OS
+- Versioning starts at 1.1.0, independent of Null OS
 - CI test: boot the ISO in QEMU, screenshot the console, run `null-install` onto a virtual disk, reboot, log in on the console and over SSH, publish screenshots and the SSH transcript to `screenshots-<arch>`
 
 ## Open

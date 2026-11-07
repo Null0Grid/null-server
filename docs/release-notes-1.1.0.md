@@ -1,4 +1,4 @@
-# Null Server 1.0.0
+# Null Server 1.1.0
 
 Null OS for servers: Debian 13 (trixie), no desktop, the same terminal. First release.
 
@@ -12,7 +12,7 @@ Live session: `null` / `null`. Write the ISO with `tools/make-usb.sh` or any ima
 
 | File | For |
 |---|---|
-| `nullserver-1.0.0-trixie-amd64.iso` | PCs, servers, Proxmox/KVM guests |
-| `nullserver-1.0.0-trixie-arm64.iso` | UEFI ARM boards and VMs |
+| `nullserver-1.1.0-trixie-amd64.iso` | PCs, servers, Proxmox/KVM guests |
+| `nullserver-1.1.0-trixie-arm64.iso` | UEFI ARM boards and VMs |
 
 Tested in CI by booting each ISO in QEMU, installing to a disk, rebooting and logging in over SSH.
