@@ -42,7 +42,10 @@ if (( NULL_GLYPH )); then NULL_SEP=$''; else NULL_SEP='@'; fi
 if [[ $COLORTERM == (truecolor|24bit) ]]; then
   _c_frame='#00e5ff' _c_user='#ff2e88' _c_path='#00e5ff' _c_err='#ff4d4d' _c_dim='#7f8fa6'
 elif [[ $TERM == linux ]]; then
-  # the text console (terminfo: 8 colours): cyan, magenta, red, white; bold brightens
+  # the text console (terminfo: 8 colours): cyan, magenta, red, white; bold brightens.
+  # The console palette is redefinable, so its "magenta" and "cyan" slots
+  # become the real Null pink and cyan (ESC ] P <slot> <rrggbb>)
+  [[ -t 1 ]] && printf '\e]P5ff2e88\e]PDff2e88\e]P600e5ff\e]PE00e5ff\e]P1ff4d4d\e]P9ff4d4d'
   _c_frame=6 _c_user=5 _c_path=6 _c_err=1 _c_dim=7
 else
   _c_frame=51 _c_user=198 _c_path=51 _c_err=203 _c_dim=103
