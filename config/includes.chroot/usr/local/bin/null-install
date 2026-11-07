@@ -67,7 +67,7 @@ if [ -z "$DISK" ]; then
 fi
 [ -b "$DISK" ] || die "$DISK is not a block device"
 [ -z "$HOST" ] && ask HOST "Hostname" "Name of this server (the prompt shows user<mark>host):" null
-[ -z "$USER_" ] && ask USER_ "Your account" "Username (gets sudo):" admin
+[ -z "$USER_" ] && ask USER_ "Your account" "Username (gets sudo):" null
 if [ -z "$PASS" ]; then
   while :; do
     ask PASS "Password" "Password for $USER_:" "" pw
@@ -160,7 +160,7 @@ HOSTS
 # Drop the live-only pieces
 in_chroot apt-get purge -y -qq live-boot live-boot-initramfs-tools live-config live-config-systemd live-tools user-setup >/dev/null 2>&1 || true
 rm -f $T/etc/live/config.conf.d/* $T/etc/systemd/system/getty@tty1.service.d/null-live.conf 2>/dev/null || true
-in_chroot userdel -r user 2>/dev/null || true
+in_chroot userdel -r null 2>/dev/null || true
 # Networking: systemd-networkd, DHCP on every wired port (no NetworkManager,
 # no ifupdown stanzas; static addresses go in /etc/systemd/network/)
 mkdir -p $T/etc/systemd/network

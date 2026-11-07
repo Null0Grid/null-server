@@ -20,7 +20,7 @@ Every design decision is in **[DESIGN.md](DESIGN.md)**. Screenshots from the lat
 - **Network toolkit** on every box: tcpdump, mtr, iperf3, dig, ethtool, WireGuard tools, lldpd, minicom, picocom.
 - **Size:** about 700 MB ISO; a fresh install uses about 2 GB.
 
-Live session login: `user` / `live`, logged in automatically on tty1, passwordless sudo. Installed systems use the account you create.
+Live session login: `null` / `null`, logged in automatically on tty1, passwordless sudo. Installed systems use the account you create.
 
 ## Get the ISO
 

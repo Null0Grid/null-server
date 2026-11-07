@@ -36,7 +36,7 @@ Carried over from Null OS unchanged, by design: `.zshrc`, `patch-font.py`, `null
 | | |
 |---|---|
 | Boot menu (ISO) | Null Server splash (mark + "NULL SERVER" in Silkscreen), cyan highlight |
-| Live session | `user`/`live`, autologin on tty1 (wrapper `null-getty` only does that when `boot=live`), passwordless sudo, persistence supported |
+| Live session | `null`/`null`, autologin on tty1 (wrapper `null-getty` only does that when `boot=live`), passwordless sudo, persistence supported |
 | Serial | `console=ttyS0,115200 console=tty0` on amd64, `ttyAMA0` on arm64, on the live ISO and in GRUB on installed systems (`GRUB_TERMINAL="console serial"`); systemd adds a login on the serial port automatically |
 | GRUB | 3-second timeout, `quiet`, no splash, Null Server as distributor |
 | First boot | `null-firstboot`: regenerates SSH host keys and machine-id (clones and images never share an identity), grows `/` into the disk (growpart + resize2fs/xfs_growfs/btrfs) |

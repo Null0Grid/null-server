@@ -8,7 +8,7 @@ Null OS for servers: Debian 13 (trixie), no desktop, the same terminal. First re
 - **Installer:** `sudo null-install` (interactive) or unattended with `null.autoinstall=` on the kernel line; UEFI + BIOS on amd64, UEFI on arm64
 - **Roles:** `null-extras` — nulldrive, containers, proxy, nas, vpn, monitoring, homelab, network, virt, backup, dev, claude
 
-Live session: `user` / `live`. Write the ISO with `tools/make-usb.sh` or any imaging tool.
+Live session: `null` / `null`. Write the ISO with `tools/make-usb.sh` or any imaging tool.
 
 | File | For |
 |---|---|
